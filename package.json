@@ -1,0 +1,52 @@
+{
+  "name": "@johnpc/jpc-sonic-app",
+  "version": "1.0.0",
+  "description": "",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "cli": "ts-node src/index-cli.ts",
+    "dev": "ts-node src/server.ts",
+    "test-auth": "node test-auth.js",
+    "build-static": "node build-static.js",
+    "build-static:prod": "node build-static.js https://sonic.jpc.io",
+    "cap:build": "npm run build-static && npx cap copy",
+    "cap:build:prod": "npm run build-static:prod && npx cap copy",
+    "cap:sync": "npm run build-static && npx cap sync",
+    "cap:sync:prod": "npm run build-static:prod && npx cap sync",
+    "cap:open:ios": "npx cap open ios",
+    "cap:run:ios": "npm run cap:sync && npx cap run ios",
+    "cap:run:ios:prod": "npm run cap:sync:prod && npx cap run ios",
+    "ios:build": "npm run cap:sync && npx cap build ios",
+    "ios:build:prod": "npm run cap:sync:prod && npx cap build ios"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.782",
+    "@aws-sdk/client-bedrock-runtime": "^3.785",
+    "@aws-sdk/credential-providers": "^3.782",
+    "@capacitor/cli": "^7.4.1",
+    "@capacitor/core": "^7.4.1",
+    "@capacitor/ios": "^7.4.1",
+    "@capacitor/splash-screen": "^7.0.1",
+    "@capacitor/status-bar": "^7.0.1",
+    "@smithy/node-http-handler": "^4.0.4",
+    "@smithy/types": "^4.1.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.9",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.21.2",
+    "pnpm": "^10.6.1",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.1",
+    "ts-node": "^10.9.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3"
+  }
+}

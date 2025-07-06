@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>jpc.sonic</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Configure WebSocket server URL (optional) -->
+    <!-- <meta name="websocket-server-url" content="https://your-websocket-server.com"> -->
+    <link rel="stylesheet" href="/src/style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+    <div id="app">
+        <div id="status" class="disconnected">Disconnected</div>
+        <div id="chat-container"></div>
+        <div id="controls">
+            <button id="start" class="button">Start Streaming</button>
+            <button id="stop" class="button" disabled>Stop Streaming</button>
+        </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
