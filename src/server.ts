@@ -53,20 +53,31 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS ?
     process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) : 
     ['http://localhost:3000', 'http://localhost:8080', 'http://127.0.0.1:3000', 'http://127.0.0.1:8080'];
 
+console.log('Configured CORS allowed origins:', allowedOrigins);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
 const io = new Server(server, {
     cors: {
         origin: (origin, callback) => {
-            // Allow requests with no origin (mobile apps, curl, etc.)
-            if (!origin) return callback(null, true);
+            console.log('CORS check for origin:', origin);
             
-            // Check if origin is in allowed list or if we're in development
-            if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+            // Allow requests with no origin (mobile apps, curl, etc.)
+            if (!origin) {
+                console.log('Allowing request with no origin');
                 return callback(null, true);
             }
             
+            // Check if origin is in allowed list or if we're in development
+            if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+                console.log('Origin allowed:', origin);
+                return callback(null, true);
+            }
+            
+            console.log('Origin blocked by CORS:', origin);
             return callback(new Error('Not allowed by CORS'));
         },
-        methods: ["GET", "POST"],
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
         credentials: true
     }
 });
@@ -110,11 +121,16 @@ app.use(express.static(path.join(__dirname, '../public')));
 // Add CORS middleware for API endpoints
 app.use('/api', (req, res, next) => {
     const origin = req.headers.origin;
+    console.log('API CORS check for origin:', origin);
+    
     if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
         res.header('Access-Control-Allow-Origin', origin || '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         res.header('Access-Control-Allow-Credentials', 'true');
+        console.log('API origin allowed:', origin);
+    } else {
+        console.log('API origin blocked by CORS:', origin);
     }
     
     if (req.method === 'OPTIONS') {

@@ -18,8 +18,13 @@
     "cap:open:ios": "npx cap open ios",
     "cap:run:ios": "npm run cap:sync && npx cap run ios",
     "cap:run:ios:prod": "npm run cap:sync:prod && npx cap run ios",
+    "cap:run:ios:debug": "npm run cap:sync && npx cap run ios --livereload --external",
     "ios:build": "npm run cap:sync && npx cap build ios",
-    "ios:build:prod": "npm run cap:sync:prod && npx cap build ios"
+    "ios:build:prod": "npm run cap:sync:prod && npx cap build ios",
+    "ios:debug": "npm run cap:sync && npx cap run ios --livereload --external --consolelogs",
+    "debug:ios": "npm run cap:sync && npx cap run ios --livereload --external --consolelogs --verbose",
+    "assets:generate": "npx capacitor-assets generate",
+    "assets:generate:ios": "npx capacitor-assets generate --ios"
   },
   "keywords": [],
   "author": "",
@@ -47,6 +52,7 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "tsx": "^4.19.3"
   }
 }

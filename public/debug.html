@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JPC Sonic App - Debug</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .debug-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .debug-section h2 {
+            margin-top: 0;
+            color: #fff;
+        }
+        
+        .test-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+            transition: background-color 0.3s;
+        }
+        
+        .test-button:hover {
+            background: #45a049;
+        }
+        
+        .test-button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .log-output {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+            border: 1px solid #4CAF50;
+        }
+        
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+            border: 1px solid #f44336;
+        }
+        
+        .status.info {
+            background: rgba(33, 150, 243, 0.3);
+            border: 1px solid #2196F3;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .info-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 6px;
+        }
+        
+        .info-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .clear-button {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            float: right;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 JPC Sonic App - Debug Console</h1>
+        
+        <div class="debug-section">
+            <h2>Environment Information</h2>
+            <div id="environment-info" class="info-grid">
+                <!-- Environment info will be populated here -->
+            </div>
+        </div>
+        
+        <div class="debug-section">
+            <h2>Audio System Tests</h2>
+            <button id="test-permissions" class="test-button">Test Microphone Permissions</button>
+            <button id="test-devices" class="test-button">Enumerate Audio Devices</button>
+            <button id="test-recording" class="test-button">Test Audio Recording (1s)</button>
+            <button id="test-context" class="test-button">Test Audio Context</button>
+            <button id="diagnose-media" class="test-button">Diagnose Media Devices</button>
+            
+            <div id="audio-status" class="status info" style="display: none;"></div>
+        </div>
+        
+        <div class="debug-section">
+            <h2>WebSocket Connection Test</h2>
+            <button id="test-websocket" class="test-button">Test WebSocket Connection</button>
+            <div id="websocket-status" class="status info" style="display: none;"></div>
+        </div>
+        
+        <div class="debug-section">
+            <h2>Debug Log Output</h2>
+            <button class="clear-button" onclick="clearLogs()">Clear Logs</button>
+            <div id="log-output" class="log-output"></div>
+        </div>
+        
+        <div class="debug-section">
+            <h2>Quick Actions</h2>
+            <button onclick="window.location.href='index.html'" class="test-button">Go to Main App</button>
+            <button onclick="exportLogs()" class="test-button">Export Debug Logs</button>
+            <button onclick="runAllTests()" class="test-button">Run All Tests</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { logger } from './src/lib/util/Logger.js';
+        import { audioUtils } from './src/lib/util/AudioUtils.js';
+
+        // Make utilities available globally for debugging
+        window.logger = logger;
+        window.audioUtils = audioUtils;
+
+        // Custom log output for debug page
+        const logOutput = document.getElementById('log-output');
+        const originalLog = logger.debugLog.bind(logger);
+        
+        logger.debugLog = function(message, data = null, level = 'log') {
+            // Call original logging
+            originalLog(message, data, level);
+            
+            // Also display in debug page
+            const timestamp = new Date().toISOString();
+            const logEntry = document.createElement('div');
+            logEntry.style.marginBottom = '5px';
+            logEntry.style.borderLeft = `3px solid ${getLogColor(level)}`;
+            logEntry.style.paddingLeft = '10px';
+            
+            let logText = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+            if (data) {
+                logText += '\n' + JSON.stringify(data, null, 2);
+            }
+            
+            logEntry.textContent = logText;
+            logOutput.appendChild(logEntry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        };
+
+        function getLogColor(level) {
+            switch (level) {
+                case 'error': return '#f44336';
+                case 'warn': return '#ff9800';
+                case 'info': return '#2196f3';
+                case 'debug': return '#9c27b0';
+                default: return '#4caf50';
+            }
+        }
+
+        // Initialize environment info
+        function displayEnvironmentInfo() {
+            const envInfo = document.getElementById('environment-info');
+            const info = {
+                'Platform': window.Capacitor?.getPlatform() || 'Web',
+                'Is Native': window.Capacitor?.isNativePlatform() || false,
+                'User Agent': navigator.userAgent.substring(0, 50) + '...',
+                'Secure Context': window.isSecureContext,
+                'Protocol': window.location.protocol,
+                'Host': window.location.host,
+                'Media Devices': !!navigator.mediaDevices,
+                'getUserMedia': !!navigator.mediaDevices?.getUserMedia,
+                'Audio Context': !!(window.AudioContext || window.webkitAudioContext),
+                'WebSocket': !!window.WebSocket
+            };
+
+            envInfo.innerHTML = '';
+            Object.entries(info).forEach(([key, value]) => {
+                const item = document.createElement('div');
+                item.className = 'info-item';
+                item.innerHTML = `
+                    <div class="info-label">${key}</div>
+                    <div>${value}</div>
+                `;
+                envInfo.appendChild(item);
+            });
+        }
+
+        // Test functions
+        async function testPermissions() {
+            const status = document.getElementById('audio-status');
+            status.style.display = 'block';
+            status.textContent = 'Testing microphone permissions...';
+            status.className = 'status info';
+
+            try {
+                const result = await logger.testMicrophoneAccess();
+                status.textContent = result ? 'Microphone access granted!' : 'Microphone access denied';
+                status.className = result ? 'status success' : 'status error';
+            } catch (error) {
+                status.textContent = `Permission test failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        async function testDevices() {
+            const status = document.getElementById('audio-status');
+            status.style.display = 'block';
+            status.textContent = 'Enumerating audio devices...';
+            status.className = 'status info';
+
+            try {
+                const devices = await audioUtils.getAudioDeviceInfo();
+                if (devices && devices.length > 0) {
+                    status.textContent = `Found ${devices.length} audio input device(s)`;
+                    status.className = 'status success';
+                    logger.info('Audio devices:', devices);
+                } else {
+                    status.textContent = 'No audio input devices found';
+                    status.className = 'status error';
+                }
+            } catch (error) {
+                status.textContent = `Device enumeration failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        async function testRecording() {
+            const status = document.getElementById('audio-status');
+            status.style.display = 'block';
+            status.textContent = 'Testing audio recording for 1 second...';
+            status.className = 'status info';
+
+            try {
+                const result = await audioUtils.testAudioRecording(1000);
+                status.textContent = result ? 'Audio recording test successful!' : 'Audio recording test failed';
+                status.className = result ? 'status success' : 'status error';
+            } catch (error) {
+                status.textContent = `Recording test failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        async function testAudioContext() {
+            const status = document.getElementById('audio-status');
+            status.style.display = 'block';
+            status.textContent = 'Testing audio context creation...';
+            status.className = 'status info';
+
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                const audioContext = new AudioContextClass();
+                
+                logger.logAudioContextInfo(audioContext);
+                
+                status.textContent = `Audio context created successfully (${audioContext.sampleRate}Hz)`;
+                status.className = 'status success';
+                
+                await audioContext.close();
+            } catch (error) {
+                status.textContent = `Audio context test failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        function diagnoseMedia() {
+            const status = document.getElementById('audio-status');
+            status.style.display = 'block';
+            status.textContent = 'Running media devices diagnosis...';
+            status.className = 'status info';
+
+            try {
+                logger.diagnoseMediaDevices();
+                status.textContent = 'Media devices diagnosis completed - check logs';
+                status.className = 'status success';
+            } catch (error) {
+                status.textContent = `Diagnosis failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        async function testWebSocket() {
+            const status = document.getElementById('websocket-status');
+            status.style.display = 'block';
+            status.textContent = 'Testing WebSocket connection...';
+            status.className = 'status info';
+
+            try {
+                const wsUrl = window.location.origin.replace('http', 'ws');
+                const socket = new WebSocket(wsUrl);
+                
+                socket.onopen = () => {
+                    status.textContent = 'WebSocket connection successful!';
+                    status.className = 'status success';
+                    socket.close();
+                };
+                
+                socket.onerror = (error) => {
+                    status.textContent = 'WebSocket connection failed';
+                    status.className = 'status error';
+                    logger.error('WebSocket error:', error);
+                };
+                
+                socket.onclose = () => {
+                    logger.info('WebSocket connection closed');
+                };
+                
+                // Timeout after 5 seconds
+                setTimeout(() => {
+                    if (socket.readyState === WebSocket.CONNECTING) {
+                        socket.close();
+                        status.textContent = 'WebSocket connection timeout';
+                        status.className = 'status error';
+                    }
+                }, 5000);
+                
+            } catch (error) {
+                status.textContent = `WebSocket test failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        async function runAllTests() {
+            logger.info('Running all debug tests...');
+            await testPermissions();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await testDevices();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await testAudioContext();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            diagnoseMedia();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await testWebSocket();
+            logger.info('All debug tests completed');
+        }
+
+        function clearLogs() {
+            document.getElementById('log-output').innerHTML = '';
+        }
+
+        function exportLogs() {
+            const logs = document.getElementById('log-output').textContent;
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `jpc-sonic-debug-${new Date().toISOString()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Make functions available globally
+        window.testPermissions = testPermissions;
+        window.testDevices = testDevices;
+        window.testRecording = testRecording;
+        window.testAudioContext = testAudioContext;
+        window.diagnoseMedia = diagnoseMedia;
+        window.testWebSocket = testWebSocket;
+        window.runAllTests = runAllTests;
+        window.clearLogs = clearLogs;
+        window.exportLogs = exportLogs;
+
+        // Event listeners
+        document.getElementById('test-permissions').addEventListener('click', testPermissions);
+        document.getElementById('test-devices').addEventListener('click', testDevices);
+        document.getElementById('test-recording').addEventListener('click', testRecording);
+        document.getElementById('test-context').addEventListener('click', testAudioContext);
+        document.getElementById('diagnose-media').addEventListener('click', diagnoseMedia);
+        document.getElementById('test-websocket').addEventListener('click', testWebSocket);
+
+        // Initialize
+        displayEnvironmentInfo();
+        logger.info('Debug console initialized');
+    </script>
+</body>
+</html>

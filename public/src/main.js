@@ -1,5 +1,7 @@
 import { AudioPlayer } from './lib/play/AudioPlayer.js';
 import { ChatHistoryManager } from "./lib/util/ChatHistoryManager.js";
+import { logger } from './lib/util/Logger.js';
+import { audioUtils } from './lib/util/AudioUtils.js';
 
 // Get WebSocket server URL from environment or use current origin as fallback
 const getWebSocketServerUrl = () => {
@@ -7,22 +9,25 @@ const getWebSocketServerUrl = () => {
     if (typeof window !== 'undefined' && window.WEBSOCKET_SERVER_URL) {
         return window.WEBSOCKET_SERVER_URL;
     }
-    
+
     // Check for meta tag configuration
     const metaTag = document.querySelector('meta[name="websocket-server-url"]');
     if (metaTag && metaTag.content) {
         return metaTag.content;
     }
-    
+
     // Fallback to current origin (original behavior)
     return window.location.origin;
 };
 
 const WEBSOCKET_SERVER_URL = getWebSocketServerUrl();
-console.log('Connecting to WebSocket server:', WEBSOCKET_SERVER_URL);
+logger.info('Connecting to WebSocket server:', WEBSOCKET_SERVER_URL);
 
 // Connect to the server with configurable URL
 const socket = io(WEBSOCKET_SERVER_URL);
+
+// Monitor WebSocket connection
+logger.monitorWebSocket(socket);
 
 // DOM elements
 const startButton = document.getElementById('start');
@@ -59,8 +64,7 @@ const audioPlayer = new AudioPlayer();
 let sessionInitialized = false;
 
 let samplingRatio = 1;
-const TARGET_SAMPLE_RATE = 16000;
-const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+let audioProcessorCleanup = null;
 
 // System prompt - will be loaded from server
 let SYSTEM_PROMPT = "You are a friend. The user and you will engage in a spoken " +
@@ -73,53 +77,70 @@ async function loadSystemPrompt() {
         const response = await fetch(`${WEBSOCKET_SERVER_URL}/api/system-prompt`);
         const data = await response.json();
         SYSTEM_PROMPT = data.systemPrompt;
-        console.log('System prompt loaded from server:', SYSTEM_PROMPT);
+        logger.info('System prompt loaded from server:', SYSTEM_PROMPT);
     } catch (error) {
-        console.warn('Failed to load system prompt from server, using default:', error);
+        logger.warn('Failed to load system prompt from server, using default:', error);
     }
 }
 
 // Initialize system prompt on page load
 loadSystemPrompt();
 
-// Initialize WebSocket audio
+// Initialize WebSocket audio with enhanced error handling
 async function initAudio() {
     try {
-        statusElement.textContent = "Requesting microphone access...";
+        statusElement.textContent = "Initializing audio system...";
         statusElement.className = "connecting";
 
-        // Request microphone access
-        audioStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
-        });
+        logger.info('Starting audio initialization...');
 
-        if (isFirefox) {
-            //firefox doesn't allow audio context have differnt sample rate than what the user media device offers
-            audioContext = new AudioContext();
+        // Check audio permissions first
+        const permissionStatus = await audioUtils.checkAudioPermissions();
+        logger.info('Audio permission status:', permissionStatus);
+
+        // Initialize audio using enhanced utilities
+        const audioConfig = await audioUtils.initializeAudio();
+
+        audioStream = audioConfig.audioStream;
+        audioContext = audioConfig.audioContext;
+        samplingRatio = audioConfig.samplingRatio;
+
+        // Resume audio context if needed (common on mobile)
+        if (audioContext) {
+            await audioUtils.resumeAudioContext(audioContext);
         } else {
-            audioContext = new AudioContext({
-                sampleRate: TARGET_SAMPLE_RATE
-            });
+            logger.error('Audio context is undefined after initialization');
+            throw new Error('Failed to create audio context');
         }
 
-        //samplingRatio - is only relevant for firefox, for Chromium based browsers, it's always 1
-        samplingRatio = audioContext.sampleRate / TARGET_SAMPLE_RATE;
-        console.log(`Debug AudioContext- sampleRate: ${audioContext.sampleRate} samplingRatio: ${samplingRatio}`)
-
-
+        // Start audio player
         await audioPlayer.start();
+
+        // Get audio device information
+        const audioDevices = await audioUtils.getAudioDeviceInfo();
+        if (audioDevices) {
+            logger.info('Available audio devices:', audioDevices);
+        }
 
         statusElement.textContent = "Microphone ready. Click Start to begin.";
         statusElement.className = "ready";
         startButton.disabled = false;
+
+        logger.info('Audio initialization completed successfully');
+
     } catch (error) {
-        console.error("Error accessing microphone:", error);
+        logger.error("Error initializing audio:", error);
         statusElement.textContent = "Error: " + error.message;
         statusElement.className = "error";
+
+        // Provide user-friendly error messages
+        if (error.message.includes('permission')) {
+            statusElement.textContent = "Please allow microphone access and refresh the page.";
+        } else if (error.message.includes('not found')) {
+            statusElement.textContent = "No microphone found. Please connect a microphone.";
+        } else if (error.message.includes('not supported')) {
+            statusElement.textContent = "Audio recording not supported in this browser.";
+        }
     }
 }
 
@@ -128,6 +149,7 @@ async function initializeSession() {
     if (sessionInitialized) return;
 
     statusElement.textContent = "Initializing session...";
+    logger.info('Initializing Bedrock session...');
 
     try {
         // Send events in sequence
@@ -138,8 +160,9 @@ async function initializeSession() {
         // Mark session as initialized
         sessionInitialized = true;
         statusElement.textContent = "Session initialized successfully";
+        logger.info('Bedrock session initialized successfully');
     } catch (error) {
-        console.error("Failed to initialize session:", error);
+        logger.error("Failed to initialize session:", error);
         statusElement.textContent = "Error initializing session";
         statusElement.className = "error";
     }
@@ -149,52 +172,46 @@ async function startStreaming() {
     if (isStreaming) return;
 
     try {
+        logger.info('Starting audio streaming...');
+
         // First, make sure the session is initialized
         if (!sessionInitialized) {
             await initializeSession();
         }
 
-        // Create audio processor
-        sourceNode = audioContext.createMediaStreamSource(audioStream);
-
-        // Use ScriptProcessorNode for audio processing
-        if (audioContext.createScriptProcessor) {
-            processor = audioContext.createScriptProcessor(512, 1, 1);
-
-            processor.onaudioprocess = (e) => {
-                if (!isStreaming) return;
-
-                const inputData = e.inputBuffer.getChannelData(0);
-                const numSamples = Math.round(inputData.length / samplingRatio)
-                const pcmData = isFirefox ? (new Int16Array(numSamples)) : (new Int16Array(inputData.length));
-
-                // Convert to 16-bit PCM
-                if (isFirefox) {
-                    for (let i = 0; i < inputData.length; i++) {
-                        //NOTE: for firefox the samplingRatio is not 1,
-                        // so it will downsample by skipping some input samples
-                        // A better approach is to compute the mean of the samplingRatio samples.
-                        // or pass through a low-pass filter first
-                        // But skipping is a preferable low-latency operation
-                        pcmData[i] = Math.max(-1, Math.min(1, inputData[i * samplingRatio])) * 0x7FFF;
-                    }
-                } else {
-                    for (let i = 0; i < inputData.length; i++) {
-                        pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-                    }
-                }
-
-
-                // Convert to base64 (browser-safe way)
-                const base64Data = arrayBufferToBase64(pcmData.buffer);
-
-                // Send to server
-                socket.emit('audioInput', base64Data);
-            };
-
-            sourceNode.connect(processor);
-            processor.connect(audioContext.destination);
+        // Resume audio context if suspended
+        if (audioContext) {
+            await audioUtils.resumeAudioContext(audioContext);
+        } else {
+            throw new Error('Audio context is not initialized. Please refresh and try again.');
         }
+
+        // Validate audio stream
+        if (!audioStream) {
+            throw new Error('Audio stream is not available. Please refresh and try again.');
+        }
+
+        // Validate audio stream is still active
+        if (!audioStream.active) {
+            throw new Error('Audio stream is no longer active. Please refresh and try again.');
+        }
+
+        // Create audio processor using enhanced utilities
+        const audioProcessor = audioUtils.createAudioProcessor(
+            audioContext,
+            audioStream,
+            samplingRatio,
+            (base64Data) => {
+                if (isStreaming) {
+                    socket.emit('audioInput', base64Data);
+                }
+            }
+        );
+
+        // Store references for cleanup
+        sourceNode = audioProcessor.sourceNode;
+        processor = audioProcessor.processor;
+        audioProcessorCleanup = audioProcessor.cleanup;
 
         isStreaming = true;
         startButton.disabled = true;
@@ -206,72 +223,28 @@ async function startStreaming() {
         transcriptionReceived = false;
         showUserThinkingIndicator();
 
+        logger.info('Audio streaming started successfully');
+
     } catch (error) {
-        console.error("Error starting recording:", error);
+        logger.error("Error starting audio streaming:", error);
         statusElement.textContent = "Error: " + error.message;
         statusElement.className = "error";
+
+        // Reset state on error
+        isStreaming = false;
+        startButton.disabled = false;
+        stopButton.disabled = true;
     }
 }
 
-// Convert ArrayBuffer to base64 string
-function arrayBufferToBase64(buffer) {
-    const binary = [];
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary.push(String.fromCharCode(bytes[i]));
-    }
-    return btoa(binary.join(''));
-}
-
-function stopStreaming() {
-    if (!isStreaming) return;
-
-    isStreaming = false;
-
-    // Clean up audio processing
-    if (processor) {
-        processor.disconnect();
-        sourceNode.disconnect();
-    }
-
-    startButton.disabled = false;
-    stopButton.disabled = true;
-    statusElement.textContent = "Processing...";
-    statusElement.className = "processing";
-
-    audioPlayer.stop();
-    // Tell server to finalize processing
-    socket.emit('stopAudio');
-
-    // End the current turn in chat history
-    chatHistoryManager.endTurn();
-}
-
-// Base64 to Float32Array conversion
+// Base64 to Float32Array conversion using enhanced utilities
 function base64ToFloat32Array(base64String) {
-    try {
-        const binaryString = window.atob(base64String);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        const int16Array = new Int16Array(bytes.buffer);
-        const float32Array = new Float32Array(int16Array.length);
-        for (let i = 0; i < int16Array.length; i++) {
-            float32Array[i] = int16Array[i] / 32768.0;
-        }
-
-        return float32Array;
-    } catch (error) {
-        console.error('Error in base64ToFloat32Array:', error);
-        throw error;
-    }
+    return audioUtils.base64ToFloat32Array(base64String);
 }
 
 // Process message data and add to chat history
 function handleTextOutput(data) {
-    console.log("Processing text output:", data);
+    logger.debug("Processing text output:", data);
     if (data.content) {
         const messageData = {
             role: data.role,
@@ -284,7 +257,7 @@ function handleTextOutput(data) {
 // Update the UI based on the current chat history
 function updateChatUI() {
     if (!chatContainer) {
-        console.error("Chat container not found");
+        logger.error("Chat container not found");
         return;
     }
 
@@ -419,7 +392,7 @@ function hideAssistantThinkingIndicator() {
 
 // Handle content start from the server
 socket.on('contentStart', (data) => {
-    console.log('Content start received:', data);
+    logger.debug('Content start received:', data);
 
     if (data.type === 'TEXT') {
         // Below update will be enabled when role is moved to the contentStart
@@ -437,7 +410,7 @@ socket.on('contentStart', (data) => {
                     const additionalFields = JSON.parse(data.additionalModelFields);
                     isSpeculative = additionalFields.generationStage === "SPECULATIVE";
                     if (isSpeculative) {
-                        console.log("Received speculative content");
+                        logger.debug("Received speculative content");
                         displayAssistantText = true;
                     }
                     else {
@@ -445,7 +418,7 @@ socket.on('contentStart', (data) => {
                     }
                 }
             } catch (e) {
-                console.error("Error parsing additionalModelFields:", e);
+                logger.error("Error parsing additionalModelFields:", e);
             }
         }
     }
@@ -459,7 +432,7 @@ socket.on('contentStart', (data) => {
 
 // Handle text output from the server
 socket.on('textOutput', (data) => {
-    console.log('Received text output:', data);
+    logger.debug('Received text output:', data);
 
     if (role === 'USER') {
         // When user text is received, show thinking indicator for assistant response
@@ -493,14 +466,14 @@ socket.on('audioOutput', (data) => {
             const audioData = base64ToFloat32Array(data.content);
             audioPlayer.playAudio(audioData);
         } catch (error) {
-            console.error('Error processing audio data:', error);
+            logger.error('Error processing audio data:', error);
         }
     }
 });
 
 // Handle content end events
 socket.on('contentEnd', (data) => {
-    console.log('Content end received:', data);
+    logger.debug('Content end received:', data);
 
     if (data.type === 'TEXT') {
         if (role === 'USER') {
@@ -517,7 +490,7 @@ socket.on('contentEnd', (data) => {
         if (data.stopReason && data.stopReason.toUpperCase() === 'END_TURN') {
             chatHistoryManager.endTurn();
         } else if (data.stopReason && data.stopReason.toUpperCase() === 'INTERRUPTED') {
-            console.log("Interrupted by user");
+            logger.info("Interrupted by user");
             audioPlayer.bargeIn();
         }
     }
@@ -543,6 +516,7 @@ socket.on('connect', () => {
     statusElement.textContent = "Connected to server";
     statusElement.className = "connected";
     sessionInitialized = false;
+    logger.info('WebSocket connected to server');
 });
 
 socket.on('disconnect', () => {
@@ -553,20 +527,86 @@ socket.on('disconnect', () => {
     sessionInitialized = false;
     hideUserThinkingIndicator();
     hideAssistantThinkingIndicator();
+    logger.warn('WebSocket disconnected from server');
 });
 
 // Handle errors
 socket.on('error', (error) => {
-    console.error("Server error:", error);
+    logger.error("Server error:", error);
     statusElement.textContent = "Error: " + (error.message || JSON.stringify(error).substring(0, 100));
     statusElement.className = "error";
     hideUserThinkingIndicator();
     hideAssistantThinkingIndicator();
 });
 
-// Button event listeners
-startButton.addEventListener('click', startStreaming);
-stopButton.addEventListener('click', stopStreaming);
+// Button event listeners - moved to after all functions are defined
+// startButton.addEventListener('click', startStreaming);
+// stopButton.addEventListener('click', stopStreaming);
 
 // Initialize the app when the page loads
-document.addEventListener('DOMContentLoaded', initAudio);
+document.addEventListener('DOMContentLoaded', () => {
+    function stopStreaming() {
+        if (!isStreaming) return;
+
+        isStreaming = false;
+
+        // Clean up audio processing
+        if (processor) {
+            processor.disconnect();
+            sourceNode.disconnect();
+        }
+
+        startButton.disabled = false;
+        stopButton.disabled = true;
+        statusElement.textContent = "Processing...";
+        statusElement.className = "processing";
+
+        audioPlayer.stop();
+        // Tell server to finalize processing
+        socket.emit('stopAudio');
+
+        // End the current turn in chat history
+        chatHistoryManager.endTurn();
+    }
+    try {
+        // Add button event listeners after all functions are defined
+        startButton.addEventListener('click', startStreaming);
+        stopButton.addEventListener('click', stopStreaming);
+
+        initAudio();
+    } catch (error) {
+        logger.error('Failed to initialize app:', error);
+        if (statusElement) {
+            statusElement.textContent = "Initialization failed: " + error.message;
+            statusElement.className = "error";
+        }
+    }
+});
+
+// Add global error handler for undefined object errors
+window.addEventListener('error', (event) => {
+    if (event.message && event.message.includes('undefined is not an object')) {
+        logger.error('Undefined object error detected:', {
+            message: event.message,
+            filename: event.filename,
+            lineno: event.lineno,
+            colno: event.colno,
+            stack: event.error?.stack
+        });
+
+        // Provide user-friendly error message
+        if (statusElement) {
+            statusElement.textContent = "Audio system error. Please refresh the page.";
+            statusElement.className = "error";
+        }
+
+        // Reset audio state
+        if (isStreaming) {
+            stopStreaming();
+        }
+
+        // Disable buttons to prevent further errors
+        if (startButton) startButton.disabled = true;
+        if (stopButton) stopButton.disabled = true;
+    }
+});

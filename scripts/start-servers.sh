@@ -34,7 +34,7 @@ log "Static Frontend Port: $STATIC_PORT"
 if [ ! -d "/app/dist-static" ]; then
     error "Static build directory not found. Running build-static..."
     cd /app
-    npm run build-static
+    npm run build-static:prod
 fi
 
 if [ ! -d "/app/dist" ]; then
@@ -73,7 +73,7 @@ log "Static file server started successfully (PID: $STATIC_PID)"
 # Start WebSocket server in background
 log "Starting WebSocket server on port $WEBSOCKET_PORT..."
 cd /app
-npm start &
+npm run dev &
 WEBSOCKET_PID=$!
 
 # Wait a moment for WebSocket server to start

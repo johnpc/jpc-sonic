@@ -34,3 +34,6 @@ ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
 
 # Capacitor
 .capacitor/
+
+# Assets - keep source assets but ignore temporary output
+assets/output/

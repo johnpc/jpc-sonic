@@ -27,7 +27,7 @@ RUN npm run build
 # The WebSocket URL will be configured at runtime
 ENV WEBSOCKET_SERVER_URL=ws://localhost:3000
 ENV ALLOWED_ORIGINS=*
-RUN npm run build-static
+RUN npm run build-static:prod
 
 # Copy and make startup script executable
 COPY scripts/start-servers.sh /app/start-servers.sh
